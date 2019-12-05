@@ -35,6 +35,8 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
   public function defaultConfiguration() {
     return [
       'watermark_path' => NULL,
+      'apply_type' => 'once',
+      'position' => 'custom',
       'margin_x' => 0,
       'margin_y' => 0,
     ];
@@ -44,10 +46,22 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
    * {@inheritdoc}
    */
   public function getSummary() {
-    $summary = [
+    $summary['watermark_path'] = [
       '#type' => 'item',
       '#markup' => t("Watermark path: @path", [
         '@path' => $this->configuration['watermark_path'],
+      ]),
+    ];
+    $summary['apply_type'] = [
+      '#type' => 'item',
+      '#markup' => t("Apply type: @path", [
+        '@path' => $this->getApplyTypeOptions()[$this->configuration['apply_type']],
+      ]),
+    ];
+    $summary['position'] = [
+      '#type' => 'item',
+      '#markup' => t("Position: @path", [
+        '@path' => $this->getPositionOptions()[$this->configuration['position']],
       ]),
     ];
     $summary += parent::getSummary();
@@ -56,28 +70,93 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
   }
 
   /**
+   * The watermark apply types.
+   *
+   * @return array
+   *   An array with the options.
+   */
+  public function getApplyTypeOptions() {
+    return [
+      'once' => $this->t('Once'),
+      'repeat' => $this->t('Repeat'),
+    ];
+  }
+
+  /**
+   * The watermark position options.
+   *
+   * @return array
+   *   An array with the options.
+   */
+  public function getPositionOptions() {
+    return [
+      'custom' => $this->t('Custom'),
+      'center' => $this->t('Center'),
+    ];
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
     $form['watermark_path'] = [
       '#type' => 'textfield',
-      '#title' => t('Watermark path'),
-      '#description' => t('Example: /sites/default/files/watermark.png, The image must be in png format and the path must be insite drupal root.'),
+      '#title' => $this->t('Watermark path'),
+      '#description' => $this->t('Example: /sites/default/files/watermark.png, The image must be in png format and the path must be insite drupal root.'),
       '#default_value' => $this->configuration['watermark_path'],
       '#required' => TRUE,
     ];
+
+    $form['apply_type'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Apply type'),
+      '#description' => $this->t('<ul>
+        <li><label>Repeat:</label> Repeat the watermark from top left until it covers the the whole image.</li>
+        <li><label>Once:</label> Add the watermark once.</li>
+        </ul>
+      '),
+      '#options' => $this->getApplyTypeOptions(),
+      '#default_value' => $this->configuration['apply_type'],
+    ];
+
+    $form['position'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Position'),
+      '#options' => $this->getPositionOptions(),
+      '#states' => [
+        'visible' => [
+          'select[name="data[apply_type]"' => ['value' => 'once'],
+        ],
+      ],
+      '#default_value' => $this->configuration['position'],
+    ];
+
     $form['margin_x'] = [
-      '#title' => t('Margin x'),
+      '#title' => $this->t('Margin left'),
       '#type' => 'textfield',
-      '#description' => t('X Offset in pixels'),
+      '#description' => $this->t('X Offset in pixels'),
       '#default_value' => $this->configuration['margin_x'],
+      '#states' => [
+        'visible' => [
+          ['select[name="data[apply_type]"' => ['value' => 'repeat']],
+          'or',
+          ['select[name="data[position]"' => ['value' => 'custom']],
+        ],
+      ],
       '#required' => TRUE,
     ];
     $form['margin_y'] = [
       '#type' => 'textfield',
-      '#description' => t('Y Offset in pixels'),
-      '#title' => t('Margin y'),
+      '#description' => $this->t('Y Offset in pixels'),
+      '#title' => $this->t('Margin top'),
       '#default_value' => $this->configuration['margin_y'],
+      '#states' => [
+        'visible' => [
+          ['select[name="data[apply_type]"' => ['value' => 'repeat']],
+          'or',
+          ['select[name="data[position]"' => ['value' => 'custom']],
+        ],
+      ],
       '#required' => TRUE,
     ];
 
@@ -91,15 +170,29 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
     $path = DRUPAL_ROOT . $form_state->getValue('watermark_path');
 
     if (!file_exists($path)) {
-      $form_state->setError($form['watermark_path'], t('File does not exist.'));
-      return;
+      $form_state->setError($form['watermark_path'], $this->t('File does not exist.'));
+    }
+    else {
+      $image_details = getimagesize($path);
+      if (!$image_details || $image_details['mime'] != 'image/png') {
+        $form_state->setError($form['watermark_path'], $this->t('File not a png.'));
+      }
     }
 
-    $image_details = getimagesize($path);
-    if (!$image_details || $image_details['mime'] != 'image/png') {
-      $form_state->setError($form['watermark_path'], t('File not a png.'));
-      return;
+    $margin_x = $form_state->getValue('margin_x');
+    if ($margin_x !== '' && (!is_numeric($margin_x) || intval($margin_x) != $margin_x || $margin_x <= 0)) {
+      $form_state->setError($form['margin_x'], $this->t('%name must be a positive integer.', [
+        '%name' => $form['margin_x']['#title'],
+      ]));
     }
+
+    $margin_y = $form_state->getValue('margin_y');
+    if ($margin_y !== '' && (!is_numeric($margin_y) || intval($margin_y) != $margin_y || $margin_y <= 0)) {
+      $form_state->setError($form['margin_y'], $this->t('%name must be a positive integer.', [
+        '%name' => $form['margin_y']['#title'],
+      ]));
+    }
+
   }
 
   /**
@@ -108,8 +201,15 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
   public function submitConfigurationForm(array &$form, FormStateInterface $form_state) {
     parent::submitConfigurationForm($form, $form_state);
     $this->configuration['watermark_path'] = $form_state->getValue('watermark_path');
+    $this->configuration['apply_type'] = $form_state->getValue('apply_type');
+    $this->configuration['position'] = $form_state->getValue('position');
     $this->configuration['margin_x'] = $form_state->getValue('margin_x');
     $this->configuration['margin_y'] = $form_state->getValue('margin_y');
+
+    if ($this->configuration['apply_type'] == 'repeat') {
+      $this->configuration['position'] = 'custom';
+    }
+
   }
 
 }
