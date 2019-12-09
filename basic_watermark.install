@@ -1,0 +1,37 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the basic_watermark module.
+ */
+
+/**
+ * Updates existing basic watermark configuration to much the new features.
+ */
+function basic_watermark_update_8001(&$sandbox) {
+  $styles = \Drupal::entityTypeManager()->getStorage('image_style')->loadMultiple();
+
+  foreach ($styles as $style) {
+    $imageEffectCollection = $style->getEffects();
+    $configuration = $imageEffectCollection->getConfiguration();
+
+    foreach ($configuration as $plugin_id => &$config) {
+      if ($config['id'] == 'add_watermark') {
+        $new_data = [
+          'watermark_path' => $config['data']['watermark_path'],
+          'apply_type' => 'once',
+          'position' => 'left-top',
+          'margins' => [
+            'left' => !empty($config['data']['margin_x']) ? $config['data']['margin_x'] : 0,
+            'top' => !empty($config['data']['margin_y']) ? $config['data']['margin_y'] : 0,
+            'right' => !empty($config['data']['margin_x']) ? $config['data']['margin_x'] : 0,
+            'bottom' => !empty($config['data']['margin_y']) ? $config['data']['margin_y'] : 0,
+          ],
+        ];
+        $config['data'] = $new_data;
+      }
+    }
+    $imageEffectCollection->setConfiguration($configuration);
+    $style->save();
+  }
+}

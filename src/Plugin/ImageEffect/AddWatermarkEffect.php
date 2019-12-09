@@ -36,9 +36,13 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
     return [
       'watermark_path' => NULL,
       'apply_type' => 'once',
-      'position' => 'custom',
-      'margin_x' => 0,
-      'margin_y' => 0,
+      'position' => 'center-center',
+      'margins' => [
+        'left' => 0,
+        'top' => 0,
+        'right' => 0,
+        'bottom' => 0,
+      ],
     ];
   }
 
@@ -90,8 +94,15 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
    */
   public function getPositionOptions() {
     return [
-      'custom' => $this->t('Custom'),
-      'center' => $this->t('Center'),
+      'left-top' => t('Top left'),
+      'center-top' => t('Top center'),
+      'right-top' => t('Top right'),
+      'left-center' => t('Center left'),
+      'center-center' => t('Center'),
+      'right-center' => t('Center right'),
+      'left-bottom' => t('Bottom left'),
+      'center-bottom' => t('Bottom center'),
+      'right-bottom' => t('Bottom right'),
     ];
   }
 
@@ -111,53 +122,59 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
       '#type' => 'select',
       '#title' => $this->t('Apply type'),
       '#description' => $this->t('<ul>
-        <li><label>Repeat:</label> Repeat the watermark from top left until it covers the the whole image.</li>
         <li><label>Once:</label> Add the watermark once.</li>
+        <li><label>Repeat:</label> Repeat the watermark from top left until it covers the the whole image.</li>
         </ul>
       '),
       '#options' => $this->getApplyTypeOptions(),
       '#default_value' => $this->configuration['apply_type'],
     ];
 
-    $form['position'] = [
-      '#type' => 'select',
-      '#title' => $this->t('Position'),
-      '#options' => $this->getPositionOptions(),
+    $form['position_wrapper'] = [
+      '#type' => 'container',
       '#states' => [
         'visible' => [
           'select[name="data[apply_type]"' => ['value' => 'once'],
         ],
       ],
-      '#default_value' => $this->configuration['position'],
+      'position' => [
+        '#theme' => 'image_anchor',
+        '#type' => 'radios',
+        '#title' => t('Position'),
+        '#options' => $this->getPositionOptions(),
+        '#default_value' => $this->configuration['position'],
+        '#description' => t('Watermark position'),
+      ],
     ];
 
-    $form['margin_x'] = [
-      '#title' => $this->t('Margin left'),
-      '#type' => 'textfield',
-      '#description' => $this->t('X Offset in pixels'),
-      '#default_value' => $this->configuration['margin_x'],
-      '#states' => [
-        'visible' => [
-          ['select[name="data[apply_type]"' => ['value' => 'repeat']],
-          'or',
-          ['select[name="data[position]"' => ['value' => 'custom']],
-        ],
+    $form['margins'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Watermark margins'),
+      '#description' => $this->t('Empty area to keep around the watermark in pixels.'),
+      'left' => [
+        '#title' => $this->t('Margin left'),
+        '#type' => 'textfield',
+        '#default_value' => $this->configuration['margins']['left'],
+        '#required' => TRUE,
       ],
-      '#required' => TRUE,
-    ];
-    $form['margin_y'] = [
-      '#type' => 'textfield',
-      '#description' => $this->t('Y Offset in pixels'),
-      '#title' => $this->t('Margin top'),
-      '#default_value' => $this->configuration['margin_y'],
-      '#states' => [
-        'visible' => [
-          ['select[name="data[apply_type]"' => ['value' => 'repeat']],
-          'or',
-          ['select[name="data[position]"' => ['value' => 'custom']],
-        ],
+      'top' => [
+        '#title' => $this->t('Margin top'),
+        '#type' => 'textfield',
+        '#default_value' => $this->configuration['margins']['top'],
+        '#required' => TRUE,
       ],
-      '#required' => TRUE,
+      'right' => [
+        '#title' => $this->t('Margin right'),
+        '#type' => 'textfield',
+        '#default_value' => $this->configuration['margins']['right'],
+        '#required' => TRUE,
+      ],
+      'bottom' => [
+        '#title' => $this->t('Margin bottom'),
+        '#type' => 'textfield',
+        '#default_value' => $this->configuration['margins']['bottom'],
+        '#required' => TRUE,
+      ],
     ];
 
     return $form;
@@ -179,20 +196,14 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
       }
     }
 
-    $margin_x = $form_state->getValue('margin_x');
-    if ($margin_x !== '' && (!is_numeric($margin_x) || intval($margin_x) != $margin_x || $margin_x <= 0)) {
-      $form_state->setError($form['margin_x'], $this->t('%name must be a positive integer.', [
-        '%name' => $form['margin_x']['#title'],
-      ]));
+    $margins = $form_state->getValue('margins');
+    foreach ($margins as $field => $margin) {
+      if ($margin !== '' && (!is_numeric($margin) || intval($margin) != $margin || $margin < 0)) {
+        $form_state->setError($form['margins'][$field], $this->t('%name must be a non negative integer.', [
+          '%name' => $form['margins'][$field]['#title'],
+        ]));
+      }
     }
-
-    $margin_y = $form_state->getValue('margin_y');
-    if ($margin_y !== '' && (!is_numeric($margin_y) || intval($margin_y) != $margin_y || $margin_y <= 0)) {
-      $form_state->setError($form['margin_y'], $this->t('%name must be a positive integer.', [
-        '%name' => $form['margin_y']['#title'],
-      ]));
-    }
-
   }
 
   /**
@@ -202,12 +213,13 @@ class AddWatermarkEffect extends ConfigurableImageEffectBase {
     parent::submitConfigurationForm($form, $form_state);
     $this->configuration['watermark_path'] = $form_state->getValue('watermark_path');
     $this->configuration['apply_type'] = $form_state->getValue('apply_type');
-    $this->configuration['position'] = $form_state->getValue('position');
-    $this->configuration['margin_x'] = $form_state->getValue('margin_x');
-    $this->configuration['margin_y'] = $form_state->getValue('margin_y');
+    $this->configuration['position'] = $form_state->getValue('position_wrapper')['position'];
+
+    $margins = $form_state->getValue('margins');
+    $this->configuration['margins'] = $form_state->getValue('margins');
 
     if ($this->configuration['apply_type'] == 'repeat') {
-      $this->configuration['position'] = 'custom';
+      $this->configuration['position'] = 'left-top';
     }
 
   }
